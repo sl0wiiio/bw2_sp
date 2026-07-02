@@ -27,10 +27,18 @@ uncertainty_normalization_mapping: dict = {0: {"name": "Undefined", "params": []
 #%% Function to create a SimaPro CSV string from a Peewee object
 
 def export_SimaPro_CSV_from_Peewee(Brightway2_Peewee_object: bw2data.backends.peewee.proxies.Activity,
-                                   separator: str = "\t"):
-    
+                                   separator: str = "\t",
+                                   export_date: str | None = None):
+
     # Check function input types
     hp.check_function_input_type(export_SimaPro_CSV_from_Peewee, locals())
+
+    # Deterministic export: when export_date is given (e.g. "01.01.2026") it is
+    # used verbatim for every "date"/"exported from Brightway" field, so the CSV
+    # is byte-stable across runs (needed for CI / reproducible publishing). When
+    # None (the default) the current wall-clock date is used, preserving the
+    # original behaviour.
+    export_date = export_date or datetime.datetime.now().strftime("%d.%m.%Y")
     
     # Initialise dictionary to store final information
     compartment_dict = {}
@@ -572,7 +580,7 @@ def export_SimaPro_CSV_from_Peewee(Brightway2_Peewee_object: bw2data.backends.pe
                          "Brightway database name": str(inventory.get("database", "parameter could not be extracted")),
                          "Brightway inventory code": str(inventory.get("code", "parameter could not be extracted")),
                          "Brightway inventory location": str(inventory.get("location", "parameter could not be extracted")),
-                         "exported from Brightway": datetime.datetime.now().strftime("%d.%m.%Y")}
+                         "exported from Brightway": export_date}
     
     # Extract comment field
     comment_field = inventory.get("comment") + "; " if inventory.get("comment") is not None else "" 
@@ -595,7 +603,7 @@ def export_SimaPro_CSV_from_Peewee(Brightway2_Peewee_object: bw2data.backends.pe
                       capital_goods: "Unspecified",
                       boundary_with_nature: "Unspecified",
                       infrastructure: "No",
-                      date: datetime.datetime.now().strftime("%d.%m.%Y"),
+                      date: export_date,
                       record: "",
                       generator: "",
                       external_documents: "",
@@ -630,18 +638,29 @@ def export_SimaPro_CSV(list_of_Brightway2_pewee_objects: list,
                        csv_format_version: str = "7.0.0",
                        decimal_separator: str = ".",
                        date_separator: str = ".",
-                       short_date_format: str = "dd.MM.yyyy"):
-    
+                       short_date_format: str = "dd.MM.yyyy",
+                       export_date: str | None = None):
+
     # Check function input types
     hp.check_function_input_type(export_SimaPro_CSV, locals())
-    
+
+    # Deterministic export: export_date (e.g. "01.01.2026") fixes every dataset
+    # date field AND the filename timestamp, so re-runs are byte-identical
+    # (CI / reproducible publishing). None → wall-clock, i.e. original behaviour.
+    date_is_pinned = export_date is not None
+    export_date = export_date or datetime.datetime.now().strftime("%d.%m.%Y")
+
     # Create a path if not provided by the function
     # If not provided, the local Brightway2 folder will be used to save results
     if folder_path_SimaPro_CSV is None:
         folder_path_SimaPro_CSV = bw2data.projects.output_dir
-    
-    # Extract current time
-    current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+
+    # Extract current time — derived from the pinned export_date when given, so
+    # the filename is stable too; otherwise the wall-clock instant (original).
+    if date_is_pinned:
+        current_time = "_".join(reversed(export_date.split(".")))  # dd.MM.yyyy → yyyy_MM_dd
+    else:
+        current_time = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
     
     # Create filename if not provided
     if file_name_SimaPro_CSV_without_ending is None:
@@ -721,7 +740,7 @@ def export_SimaPro_CSV(list_of_Brightway2_pewee_objects: list,
             continue
         
         # Extract the SimaPro specific string of the current inventory and add to list
-        inv_strings += [export_SimaPro_CSV_from_Peewee(obj, separator)]
+        inv_strings += [export_SimaPro_CSV_from_Peewee(obj, separator, export_date=export_date)]
         
         # If we specified to not export inventories twice, write the current SimaPro name to the dictionary so that it is omitted (and not exported) in case it would appear once more again.
         if avoid_exporting_inventories_twice:
